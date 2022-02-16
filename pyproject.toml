@@ -1,0 +1,36 @@
+[tool.black]
+line-length = 120
+target-version = ['py38']
+include = '\.pyi?$'
+exclude = '''
+
+(
+  /(
+      \.eggs
+    | \.git
+    | \.hg
+    | \.mypy_cache
+    | \.tox
+    | \venv
+    | \.venv
+    | _build
+    | buck-out
+    | build
+    | dist
+  )/
+)
+'''
+
+[tool.isort]
+line_length = 120
+multi_line_output = 3
+include_trailing_comma = true
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --cov=calc_engine --cov=lib --cov-branch --cov-report=xml --cov-report=html --junitxml=junit.xml --disable-warnings"
+testpaths = "."
+markers = [
+  "integration_test: mark a test as an integration test",
+  "debug: marker for selecting tests for debug",
+  "data_health: data health tests"
+]
