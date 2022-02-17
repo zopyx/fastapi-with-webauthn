@@ -1,23 +1,26 @@
 import base64
+import os
+import pickle
 from pathlib import Path
 
 import webauthn
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import validator
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from webauthn.helpers.structs import (
-    RegistrationCredential,
-    PublicKeyCredentialCreationOptions,
-    PublicKeyCredentialRequestOptions,
+    AttestationConveyancePreference,
     AuthenticationCredential,
-    UserVerificationRequirement,
-    AuthenticatorSelectionCriteria,
     AuthenticatorAttachment,
-    ResidentKeyRequirement,
+    AuthenticatorSelectionCriteria,
+    PublicKeyCredentialCreationOptions,
     PublicKeyCredentialDescriptor,
-    AuthenticatorTransport,
+    PublicKeyCredentialRequestOptions,
+    PublicKeyCredentialType,
+    RegistrationCredential,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
 )
 
 # secrets.token_hex()
@@ -38,26 +41,13 @@ app = FastAPI(middleware=middleware)
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    # language=HTML
-    return """
-<h1>Webauthn demo</h1>
-<div style="display: flex; justify-content: space-around">
-  <div style="border: 1px solid black; padding: 10px">
-    <h2>Register</h2>
-    <label for="user-id-register">User ID:</label>
-    <input type="number" step="1" id="user-id-register"/>
-    <button onclick="register()">Register</button>
-  </div>
-  <div style="border: 1px solid black; padding: 10px">
-    <h2>Authenticate</h2>
-    <label for="user-id-auth">User ID:</label>
-    <input type="number" step="1" id="user-id-auth"/>
-    <button onclick="authenticate()">Authenticate</button>
-  </div>
-</div>
-<pre id="log"></pre>
-<script src="/webauthn_client.js"></script>
-"""
+    with open("src/index.html") as fh:
+        # language=HTML
+        return fh.read()
+
+
+class CSSResponse(HTMLResponse):
+    media_type = "text/css"
 
 
 class JavascriptResponse(HTMLResponse):
@@ -69,18 +59,39 @@ async def client_js():
     return Path("src/webauthn_client.js").read_bytes()
 
 
-@app.get("/register/{user_id:int}/", response_model=PublicKeyCredentialCreationOptions)
-async def register_get(request: Request, user_id: int):
-    public_key = webauthn.generate_registration_options(
+@app.get("/styles.css", response_class=CSSResponse)
+async def client_css():
+    return Path("src/styles.css").read_bytes()
+
+
+ATTESTATION_TYPE_MAPPING = {
+    "none": AttestationConveyancePreference.NONE,
+    "indirect": AttestationConveyancePreference.INDIRECT,
+    "direct": AttestationConveyancePreference.DIRECT,
+}
+
+
+AUTH_MAPPING = {
+    "cross-platform": AuthenticatorAttachment.CROSS_PLATFORM,
+    "platform": AuthenticatorAttachment.PLATFORM,
+}
+
+
+@app.get("/register/{user_id:str}/", response_model=PublicKeyCredentialCreationOptions)
+async def register_get(request: Request, user_id: str, attestation_type: str, authenticator_type: str):
+    public_key = webauthn.generate_registration_options(  # type: ignore
         rp_id="localhost",
         rp_name="MyCompanyName",
         user_id=str(user_id),
         user_name=f"{user_id}@example.com",
         user_display_name="Samuel Colvin",
+        attestation=ATTESTATION_TYPE_MAPPING[attestation_type],
         authenticator_selection=AuthenticatorSelectionCriteria(
-            authenticator_attachment=AuthenticatorAttachment.CROSS_PLATFORM,
+            authenticator_attachment=AUTH_MAPPING[authenticator_type]
+            if authenticator_type
+            else AuthenticatorAttachment.CROSS_PLATFORM,
             resident_key=ResidentKeyRequirement.DISCOURAGED,
-            user_verification=UserVerificationRequirement.DISCOURAGED,
+            user_verification=UserVerificationRequirement.REQUIRED,
         ),
     )
     request.session["webauthn_register_challenge"] = base64.b64encode(public_key.challenge).decode()
@@ -104,12 +115,17 @@ class CustomRegistrationCredential(RegistrationCredential):
 
 
 auth_database = {}
+file = open("src/pickle_file", "rb")
+if os.stat("src/pickle_file").st_size != 0:
+    auth_database = pickle.load(file)
+
+file.close()
 
 
-@app.post("/register/{user_id:int}/")
-async def register_post(request: Request, user_id: int, credential: CustomRegistrationCredential):
+@app.post("/register/{user_id:str}/")
+async def register_post(request: Request, user_id: str, credential: CustomRegistrationCredential):
     expected_challenge = base64.b64decode(request.session["webauthn_register_challenge"].encode())
-    registration = webauthn.verify_registration_response(
+    registration = webauthn.verify_registration_response(  # type: ignore
         credential=credential,
         expected_challenge=expected_challenge,
         expected_rp_id="localhost",
@@ -119,20 +135,30 @@ async def register_post(request: Request, user_id: int, credential: CustomRegist
         "public_key": registration.credential_public_key,
         "sign_count": registration.sign_count,
         "credential_id": registration.credential_id,
+        "challenge": expected_challenge,
     }
 
+    with open("src/pickle_file", "wb") as fh:
+        pickle.dump(auth_database, fh)
 
-@app.get("/auth/{user_id:int}/", response_model=PublicKeyCredentialRequestOptions)
-async def auth_get(request: Request, user_id: int):
+
+@app.get("/auth/{user_id:str}/", response_model=PublicKeyCredentialRequestOptions)
+async def auth_get(request: Request, user_id: str, attestation_type: str, authenticator_type: str):
     try:
         user_creds = auth_database[user_id]
     except KeyError:
         raise HTTPException(status_code=404, detail="user not found")
 
-    public_key = webauthn.generate_authentication_options(
+    public_key = webauthn.generate_authentication_options(  # type: ignore
         rp_id="localhost",
-        allow_credentials=[PublicKeyCredentialDescriptor(id=user_creds["credential_id"])],
-        user_verification=UserVerificationRequirement.REQUIRED,
+        timeout=50000,
+        allow_credentials=[
+            PublicKeyCredentialDescriptor(
+                type=PublicKeyCredentialType.PUBLIC_KEY,
+                id=user_creds["credential_id"],
+            )
+        ],
+        user_verification=UserVerificationRequirement.DISCOURAGED,
     )
     request.session["webauthn_auth_challenge"] = base64.b64encode(public_key.challenge).decode()
     return public_key
@@ -150,15 +176,15 @@ class CustomAuthenticationCredential(AuthenticationCredential):
         return {k: b64decode(v) for k, v in data.items()}
 
 
-@app.post("/auth/{user_id:int}/")
-async def auth_post(request: Request, user_id: int, credential: CustomAuthenticationCredential):
+@app.post("/auth/{user_id:str}/")
+async def auth_post(request: Request, user_id: str, credential: CustomAuthenticationCredential):
     expected_challenge = base64.b64decode(request.session["webauthn_auth_challenge"].encode())
     try:
         user_creds = auth_database[user_id]
     except KeyError:
         raise HTTPException(status_code=404, detail="user not found")
 
-    auth = webauthn.verify_authentication_response(
+    auth = webauthn.verify_authentication_response(  # type: ignore
         credential=credential,
         expected_challenge=expected_challenge,
         expected_rp_id="localhost",
@@ -166,5 +192,4 @@ async def auth_post(request: Request, user_id: int, credential: CustomAuthentica
         credential_public_key=user_creds["public_key"],
         credential_current_sign_count=user_creds["sign_count"],
     )
-    debug(auth)
     user_creds["sign_count"] = auth.new_sign_count
