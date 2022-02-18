@@ -25,7 +25,8 @@ from webauthn.helpers.structs import (
 
 # secrets.token_hex()
 secret_key = "9c580e0641762c32eab407257d924c25d5c8dd44a67d9efb4403038ae783c37c"
-
+rp_id = "fastapi-with-webauthn-f4t9j.ondigitalocean.app"
+origin = "https://fastapi-with-webauthn-f4t9j.ondigitalocean.app:8080/"
 middleware = [
     Middleware(
         SessionMiddleware,
@@ -80,11 +81,11 @@ AUTH_MAPPING = {
 @app.get("/register/{user_id:str}/", response_model=PublicKeyCredentialCreationOptions)
 async def register_get(request: Request, user_id: str, attestation_type: str, authenticator_type: str):
     public_key = webauthn.generate_registration_options(  # type: ignore
-        rp_id="localhost",
-        rp_name="MyCompanyName",
+        rp_id=rp_id,
+        rp_name="fastapi-webauth",
         user_id=str(user_id),
         user_name=f"{user_id}@example.com",
-        user_display_name="Samuel Colvin",
+        user_display_name=f"{user_id}",
         attestation=ATTESTATION_TYPE_MAPPING[attestation_type],
         authenticator_selection=AuthenticatorSelectionCriteria(
             authenticator_attachment=AUTH_MAPPING[authenticator_type]
@@ -128,8 +129,8 @@ async def register_post(request: Request, user_id: str, credential: CustomRegist
     registration = webauthn.verify_registration_response(  # type: ignore
         credential=credential,
         expected_challenge=expected_challenge,
-        expected_rp_id="localhost",
-        expected_origin="http://localhost:8000",
+        expected_rp_id=rp_id,
+        expected_origin=origin,
     )
     auth_database[user_id] = {
         "public_key": registration.credential_public_key,
@@ -150,7 +151,7 @@ async def auth_get(request: Request, user_id: str, attestation_type: str, authen
         raise HTTPException(status_code=404, detail="user not found")
 
     public_key = webauthn.generate_authentication_options(  # type: ignore
-        rp_id="localhost",
+        rp_id=rp_id,
         timeout=50000,
         allow_credentials=[
             PublicKeyCredentialDescriptor(
@@ -187,8 +188,8 @@ async def auth_post(request: Request, user_id: str, credential: CustomAuthentica
     auth = webauthn.verify_authentication_response(  # type: ignore
         credential=credential,
         expected_challenge=expected_challenge,
-        expected_rp_id="localhost",
-        expected_origin="http://localhost:8000",
+        expected_rp_id=rp_id,
+        expected_origin=origin,
         credential_public_key=user_creds["public_key"],
         credential_current_sign_count=user_creds["sign_count"],
     )
