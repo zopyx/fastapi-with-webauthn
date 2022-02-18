@@ -26,7 +26,7 @@ from webauthn.helpers.structs import (
 # secrets.token_hex()
 secret_key = "9c580e0641762c32eab407257d924c25d5c8dd44a67d9efb4403038ae783c37c"
 rp_id = "fastapi-with-webauthn-f4t9j.ondigitalocean.app"
-origin = "https://fastapi-with-webauthn-f4t9j.ondigitalocean.app:8080/"
+origin = "https://fastapi-with-webauthn-f4t9j.ondigitalocean.app"
 middleware = [
     Middleware(
         SessionMiddleware,
