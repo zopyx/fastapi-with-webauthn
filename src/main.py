@@ -79,10 +79,10 @@ AUTH_MAPPING = {
 
 @app.get("/register/{user_id:str}/", response_model=PublicKeyCredentialCreationOptions)
 async def register_get(request: Request, user_id: str, attestation_type: str, authenticator_type: str):
-    public_key = webauthn.generate_registration_options(  # type: ignore
+    public_key = webauthn.generate_registration_options(
         rp_id="localhost",
         rp_name="MyCompanyName",
-        user_id=str(user_id),
+        user_id=user_id,
         user_name=f"{user_id}@example.com",
         user_display_name="Samuel Colvin",
         attestation=ATTESTATION_TYPE_MAPPING[attestation_type],
@@ -94,6 +94,7 @@ async def register_get(request: Request, user_id: str, attestation_type: str, au
             user_verification=UserVerificationRequirement.REQUIRED,
         ),
     )
+
     request.session["webauthn_register_challenge"] = base64.b64encode(public_key.challenge).decode()
     return public_key
 
@@ -104,22 +105,20 @@ def b64decode(s: str) -> bytes:
 
 class CustomRegistrationCredential(RegistrationCredential):
     @validator("raw_id", pre=True)
-    def convert_raw_id(cls, v: str):
+    def convert_raw_id(self, v: str):
         assert isinstance(v, str), "raw_id is not a string"
         return b64decode(v)
 
     @validator("response", pre=True)
-    def convert_response(cls, data: dict):
+    def convert_response(self, data: dict):
         assert isinstance(data, dict), "response is not a dictionary"
         return {k: b64decode(v) for k, v in data.items()}
 
 
 auth_database = {}
-file = open("src/pickle_file", "rb")
-if os.stat("src/pickle_file").st_size != 0:
-    auth_database = pickle.load(file)
-
-file.close()
+with open("src/pickle_file", "rb") as file:
+    if os.stat("src/pickle_file").st_size != 0:
+        auth_database = pickle.load(file)
 
 
 @app.post("/register/{user_id:str}/")
@@ -166,12 +165,12 @@ async def auth_get(request: Request, user_id: str, attestation_type: str, authen
 
 class CustomAuthenticationCredential(AuthenticationCredential):
     @validator("raw_id", pre=True)
-    def convert_raw_id(cls, v: str):
+    def convert_raw_id(self, v: str):
         assert isinstance(v, str), "raw_id is not a string"
         return b64decode(v)
 
     @validator("response", pre=True)
-    def convert_response(cls, data: dict):
+    def convert_response(self, data: dict):
         assert isinstance(data, dict), "response is not a dictionary"
         return {k: b64decode(v) for k, v in data.items()}
 
